@@ -1,5 +1,7 @@
 import abc
 import enum
+from dataclasses import dataclass
+from typing import List, Union, Optional
 
 
 class Note(enum.Enum):
@@ -37,13 +39,39 @@ STRING_TO_NOTES = {
 }
 
 
-GUITAR_STANDARD_TUNING = (Note.E, Note.A, Note.D, Note.G, Note.B, Note.E)
+@dataclass
+class Tuning:
+    name: str
+    tuning: List[Note]
+
+
+StandardTuning = Tuning("Standard", [Note.E, Note.A, Note.D, Note.G, Note.B, Note.E])
+KorbinsTuning = Tuning("Korbins", [Note.D, Note.A, Note.E, Note.A, Note.C_SH, Note.E])
+GUITAR_TUNINGS = {t.name: t for t in (StandardTuning, KorbinsTuning)}
 
 
 class Key(abc.ABC):
+    def __init__(self, root_note: Optional[Note], **kwargs):
+        super().__init__(**kwargs)
+        self._root_note = root_note
+        self._notes = self._get_notes_with_spacing(root_note, self.spacing)
+
+    @classmethod
     @abc.abstractmethod
-    def get_notes(self):
+    def name(cls):
         raise NotImplementedError()
+
+    @property
+    @abc.abstractmethod
+    def spacing(self) -> List[int]:
+        raise NotImplementedError()
+
+    @property
+    def root_note(self):
+        return self._root_note
+
+    def get_notes(self):
+        return self._notes
 
     @classmethod
     def _get_notes_with_spacing(cls, root_note, spacing):
@@ -63,27 +91,33 @@ class Key(abc.ABC):
 
 
 class ChromaticKey(Key):
-    _NOTES = list(Note)
+    @classmethod
+    def name(cls):
+        return "Chromatic"
 
-    def get_notes(self):
-        return self._NOTES
+    @property
+    def spacing(self) -> List[int]:
+        return [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
 
 class MajorKey(Key):
-    SPACING = (2, 2, 1, 2, 2, 2)
+    @classmethod
+    def name(cls):
+        return "Major"
 
-    def __init__(self, note: Note):
-        self._notes = self._get_notes_with_spacing(note, self.SPACING)
-
-    def get_notes(self):
-        return self._notes
+    @property
+    def spacing(self) -> List[int]:
+        return [2, 2, 1, 2, 2, 2]
 
 
 class MinorKey(Key):
-    SPACING = (2, 1, 2, 2, 1, 2)
+    @classmethod
+    def name(cls):
+        return "Minor"
 
-    def __init__(self, note: Note):
-        self._notes = self._get_notes_with_spacing(note, self.SPACING)
+    @property
+    def spacing(self) -> List[int]:
+        return [2, 1, 2, 2, 1, 2]
 
-    def get_notes(self):
-        return self._notes
+
+KEYS = {k.name(): k for k in (ChromaticKey, MajorKey, MinorKey)}

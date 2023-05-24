@@ -2,10 +2,9 @@ from dataclasses import dataclass
 import tkinter as tk
 from typing import Tuple
 
-from guitar_trainer.music_utils import NOTE_TO_STRING, Note, STRING_TO_NOTES, MajorKey
-from guitar_trainer.trainer import GuitarTrainer
-
-GUITAR_STRING_SIZES = (8, 6, 5, 4, 3, 2)
+from guitar_trainer.music_utils import NOTE_TO_STRING, Note, STRING_TO_NOTES, MajorKey, StandardTuning, GUITAR_TUNINGS, \
+    KEYS
+from guitar_trainer.trainer import GuitarTrainer, Instrument
 
 
 @dataclass
@@ -16,7 +15,7 @@ class GuitarTrainerGuiRunParams:
     nut_width: int = 25
     fret_width: int = 5
     fret_count: int = 14
-    string_sizes: Tuple[int] = GUITAR_STRING_SIZES
+    string_sizes: Tuple[int] = (8, 6, 5, 4, 3, 2)
 
 
 @dataclass
@@ -27,6 +26,7 @@ class GuitarTrainerGuiColorParams:
     circle_color = "#000000"
     string_color = '#999999'
     note_circle_color = "#FEE12B"
+    root_note_circle_color = "#00FF00"
 
 
 @dataclass
@@ -36,7 +36,8 @@ class NoteCircle:
 
 
 class GuitarTrainerGui:
-    def __init__(self, trainer: GuitarTrainer, color_params: GuitarTrainerGuiColorParams = GuitarTrainerGuiColorParams()):
+    def __init__(self, trainer: GuitarTrainer,
+                 color_params: GuitarTrainerGuiColorParams = GuitarTrainerGuiColorParams()):
         self.root = tk.Tk()
         self.canvas = None
         self.note_circles = None
@@ -46,9 +47,7 @@ class GuitarTrainerGui:
         self.color_params = color_params
 
     def _validate_run_params(self, params: GuitarTrainerGuiRunParams):
-        if len(params.string_sizes) != self.trainer.num_strings:
-            raise ValueError(f"Num strings reported by trainer ({self.trainer.num_strings()}) differs "
-                             f"from string_sizes provided by params argument ({len(params.string_sizes)})")
+        pass
 
     def _draw_circle(self, center_x, center_y, radius):
         return self.canvas.create_oval(center_x - radius, center_y - radius,
@@ -62,7 +61,9 @@ class GuitarTrainerGui:
         default_kwargs = {
             "invisible": not bool(note)
         }
-        self._modify_canvas_item(note_circle.circle_tk_id, fill=self.color_params.note_circle_color, **default_kwargs)
+        fill_color = self.color_params.root_note_circle_color if note == self.trainer.root_note else self.color_params.note_circle_color
+
+        self._modify_canvas_item(note_circle.circle_tk_id, fill=fill_color, **default_kwargs)
         self._modify_canvas_item(note_circle.text_tk_id, text=NOTE_TO_STRING.get(note, ""), **default_kwargs)
         self.canvas.tag_raise(note_circle.text_tk_id, note_circle.circle_tk_id)
 
@@ -93,18 +94,18 @@ class GuitarTrainerGui:
                 vertical_center_offset = params.neck_width / 6
 
                 # draw double dot
-                self._draw_circle(fret_wood_center_x, fret_wood_center_y-vertical_center_offset, circle_radius)
-                self._draw_circle(fret_wood_center_x, fret_wood_center_y+vertical_center_offset, circle_radius)
+                self._draw_circle(fret_wood_center_x, fret_wood_center_y - vertical_center_offset, circle_radius)
+                self._draw_circle(fret_wood_center_x, fret_wood_center_y + vertical_center_offset, circle_radius)
             elif chromatic_scale_position in single_dot_spaces:
 
                 # draw single dot
                 self._draw_circle(fret_wood_center_x, fret_wood_center_y, circle_radius)
 
     def _draw_strings(self, params: GuitarTrainerGuiRunParams, neck_upper, neck_lower):
-        string_count = len(params.string_sizes)
+        string_count = self.trainer.num_strings
         string_spacing = params.neck_width / string_count
 
-        for i, string_width in enumerate(params.string_sizes):
+        for i, string_width in enumerate(params.string_sizes[:string_count]):
             string_center_y = neck_upper - (string_spacing / 2) - string_spacing * i
 
             string_upper_y = string_center_y + (string_width / 2)
@@ -163,31 +164,89 @@ class GuitarTrainerGui:
             for fret_id, note_circle in enumerate(self.note_circles[string_id]):
                 self._update_note_circle(note_circle, fret_notes.get(fret_id))
 
+    def _create_root_note_change_handler(self, params):
+        def _handle_root_note_change(choice):
+            note = STRING_TO_NOTES[choice]
+            self.trainer.set_root_note(note)
+            self._update_note_circles(params)
+
+        return _handle_root_note_change
+
+    def _create_tuning_change_handler(self, params):
+        def _handle_tuning_change(choice):
+            tuning = GUITAR_TUNINGS[choice]
+            self.trainer.set_tuning(tuning)
+            self._update_note_circles(params)
+
+        return _handle_tuning_change
+
     def _create_key_change_handler(self, params):
         def _handle_key_change(choice):
-            note = STRING_TO_NOTES[choice]
-            new_key = MajorKey(note)
-            self.trainer.set_key(new_key)
+            key = KEYS[choice]
+            self.trainer.set_key(key)
             self._update_note_circles(params)
 
         return _handle_key_change
 
-    def run(self, params: GuitarTrainerGuiRunParams):
+    def _create_instrument_change_handler(self, params):
+        def _handle_instrument_change(choice):
+            key = Instrument(choice)
+            self.trainer.set_instrument(key)
+            self.canvas.delete("all")
+            self._draw_neck(params)
+            self._update_note_circles(params)
+
+        return _handle_instrument_change
+
+    def _create_ui_elements(self, params):
+        def _create_str_var(text):
+            str_var = tk.StringVar()
+            str_var.set(text)
+            return str_var
+
+        def _create_label(text):
+            str_var = _create_str_var(text)
+            return tk.Label(self.root, textvariable=str_var)
+
+        def _create_option_menu(default, values, handler):
+            str_var = _create_str_var(default)
+            return tk.OptionMenu(self.root, str_var, *values, command=handler)
+
+        def _create_label_option_menu_pair(label_text, default, values, handler):
+            label = _create_label(label_text)
+            option = _create_option_menu(default, values, handler)
+            return label, option
+
         self.canvas = tk.Canvas(self.root, width=params.window_width, height=params.window_height)
-        self.canvas.pack()
+        self.canvas.grid(row=0, column=0, columnspan=8)
 
-        key_string = tk.StringVar()
-        key_string.set("Key: ")
-        key_label = tk.Label(self.root, textvariable=key_string)
-        key_label.pack()
+        instrument_label, instrument_option = _create_label_option_menu_pair(
+            "Instrument: ", Instrument.GUITAR.value, [i.value for i in Instrument],
+            self._create_instrument_change_handler(params))
+        instrument_label.grid(row=1, column=0, sticky=tk.E)
+        instrument_option.grid(row=1, column=1, sticky=tk.W)
 
-        key_var = tk.StringVar()
-        key_var.set("C")
 
-        key_option = tk.OptionMenu(self.root, key_var, *[NOTE_TO_STRING[n] for n in list(Note)],
-                                   command=self._create_key_change_handler(params))
-        key_option.pack()
+        root_note_label, root_note_option = _create_label_option_menu_pair(
+            "Root: ", NOTE_TO_STRING[self.trainer.root_note], [NOTE_TO_STRING[n] for n in list(Note)],
+            self._create_root_note_change_handler(params))
+        root_note_label.grid(row=1, column=2, sticky=tk.E)
+        root_note_option.grid(row=1, column=3, sticky=tk.W)
 
+        key_label, key_option = _create_label_option_menu_pair("Key: ", MajorKey.name(), list(KEYS),
+                                                               self._create_key_change_handler(params))
+        key_label.grid(row=1, column=4, sticky=tk.E)
+        key_option.grid(row=1, column=5, sticky=tk.W)
+
+        tuning_label, tuning_option = _create_label_option_menu_pair("Tuning: ", self.trainer.tuning.name,
+                                                                     GUITAR_TUNINGS.keys(),
+                                                                     self._create_tuning_change_handler(params))
+        tuning_label.grid(row=1, column=6, sticky=tk.E)
+        tuning_option.grid(row=1, column=7, sticky=tk.W)
+
+    def run(self, params: GuitarTrainerGuiRunParams):
+
+        self._create_ui_elements(params)
         self._draw_neck(params)
         self._update_note_circles(params)
 
